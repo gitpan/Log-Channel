@@ -32,8 +32,8 @@ sub log (@) {
 
 package One::Subone;
 
-my $log = new Log::Channel;
-sub msg { $log->(@_) }
+my $log11 = new Log::Channel;
+sub msg { $log11->(@_) }
 
 sub log (@) {
     msg @_;
@@ -43,8 +43,8 @@ sub log (@) {
 
 package Two;
 
-my $log = new Log::Channel;
-sub msg { $log->(@_) }
+my $log2 = new Log::Channel;
+sub msg { $log2->(@_) }
 
 sub log (@) {
     msg @_;
@@ -91,7 +91,6 @@ close STDERR;
 open (LINES, "<$stderrfile") or die $!;
 my @lines = <LINES>;
 close LINES;
-print @lines;
 ok ((scalar grep { /message 01/ } @lines) == 1);
 ok ((scalar grep { /message 2/ } @lines) == 1);
 ok ((scalar grep { /message 3/ } @lines) == 0);
@@ -111,4 +110,4 @@ ok ((scalar grep { /One::Subone:/ } @lines) == 1);
 ######################################################################
 # Clean up
 
-#unlink $stderrfile;
+unlink $stderrfile;

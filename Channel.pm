@@ -49,6 +49,8 @@ levels anything you want.
 Able to take over carp and croak events from other modules and route the
 output according to the Log::Channel configuration.
 
+=back
+
 =head1 CONFIGURATION
 
 If $ENV{LOG_CHANNEL_CONFIG} is set, then this is taken as the name of a
@@ -75,6 +77,8 @@ first time a Log::Channel is created.  Config file syntax is XML:
       <priority>crit</priority>
     </channel>
   </channel_config>
+
+=over 4
 
 =item *
 
@@ -103,7 +107,7 @@ Log::Dispatch must be initialized explicitly
 
 use strict;
 use vars qw($VERSION);
-$VERSION = '0.6';
+$VERSION = '0.7';
 
 use Log::Dispatch;
 use POSIX qw(strftime);
@@ -612,11 +616,34 @@ sub _topic {
     return ($topic, $channel_config);
 }
 
+=item B<export>
+
+  $channel->export("subname");
+
+Exports a logging subroutine into the calling package's namespace.
+Does the same thing as
+
+  sub mylog { $channel->(@_) }
+
+=cut
+
+sub export {
+    my ($channel, $subname) = @_;
+
+    my $package = (caller)[0];
+
+    no strict 'refs';
+
+    *{"$package\::$subname"} = sub { $channel->(@_) };
+}
+
 1;
 
 =back
 
 =head1 TO DO
+
+=over 4
 
 =item *
 
@@ -631,6 +658,8 @@ activation status, and where the messages are going.
 
 Ability to commandeer "print STDERR".  To pick up other types of module
 logging - and capture die() messages.
+
+=back
 
 =head1 AUTHOR
 
@@ -731,7 +760,8 @@ sub _configure {
     decorate $channel ($config->{decoration})
       if $config->{decoration};
 
-    if ($config->{dispatch} =~ /Log::Dispatch/oi) {
+    if (defined $config->{dispatch}
+	&& $config->{dispatch} =~ /Log::Dispatch/oi) {
 	dispatch $channel (Log::Dispatch::Config->instance);
     }
 

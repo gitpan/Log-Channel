@@ -4,5 +4,9 @@ use ExtUtils::MakeMaker;
 WriteMakefile(
     'NAME'		=> 'Log::Channel',
     'VERSION_FROM'	=> 'Channel.pm', # finds $VERSION
-    'PREREQ_PM'		=> { Log::Dispatch => 1.80 }, # e.g., Module::Name => 1.1
+    'PREREQ_PM'		=> {
+			    Log::Dispatch => 2.01,
+			    Log::Dispatch::Config => 1.01,
+			    XML::Simple => 1.08,
+			   }, # e.g., Module::Name => 1.1
 );

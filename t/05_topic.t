@@ -65,7 +65,6 @@ close STDERR;
 open (LINES, "<$stderrfile") or die $!;
 my @lines = <LINES>;
 close LINES;
-print @lines;
 ok ((scalar grep { /message 01/ } @lines) == 1);
 ok ((scalar grep { /message 2/ } @lines) == 1);
 ok ((scalar grep { /message 3/ } @lines) == 0);
