@@ -49,6 +49,50 @@ levels anything you want.
 Able to take over carp and croak events from other modules and route the
 output according to the Log::Channel configuration.
 
+=head1 CONFIGURATION
+
+If $ENV{LOG_CHANNEL_CONFIG} is set, then this is taken as the name of a
+file containing log configuration instructions which will be loaded the
+first time a Log::Channel is created.  Config file syntax is XML:
+
+  <channel_config>
+    <dispatch_config>/home/user/configs/log_disp.conf</dispatch_config>
+    <channel>
+      <topic>One</topic>
+      <active />
+      <decoration>%t %d: %m</decoration>
+      <dispatch>stderr</dispatch>
+    </channel>
+    <channel>
+      <topic>Two::Three</topic>
+      <dispatch>Log::Dispatch</dispatch>
+      <priority>crit</priority>
+    </channel>
+    <channel>
+      <topic>Four</topic>
+      <suppress />
+      <dispatch>Log::Dispatch</dispatch>
+      <priority>crit</priority>
+    </channel>
+  </channel_config>
+
+=item *
+
+If <dispatch> is omitted, logging defaults to STDERR.
+
+=item *
+
+Logging defaults on for all topics without an explicit <active> or
+<suppress> directive.  Omitted topics default on as well.
+
+=item *
+
+To use Log::Dispatch for message dispatch,
+specify Log::Dispatch for <dispatch>.  If a filename is
+specified in <dispatch_config>, then the Log::Dispatch module will be
+configured from that file (see Log::Dispatch::Config), otherwise
+Log::Dispatch must be initialized explicitly
+
 =back
 
 =head1 METHODS
@@ -59,13 +103,15 @@ output according to the Log::Channel configuration.
 
 use strict;
 use vars qw($VERSION);
-$VERSION = '0.5';
+$VERSION = '0.6';
 
 use Log::Dispatch;
 use POSIX qw(strftime);
 
 my %Channel;
 my %Config_by_channel;
+
+my $Configuration;
 
 =item B<new>
 
@@ -100,6 +146,10 @@ sub new {
     my $proto = shift;
     my $class = ref ($proto) || $proto;
 
+    if (!$Configuration) {
+	$Configuration = new Log::Channel::Config;
+    }
+
     my $package = (caller)[0];
     if ($package ne "main") {
 	unshift @_, $package;
@@ -131,6 +181,8 @@ sub _make {
     $Channel{$topic} = $config;
     $Config_by_channel{$self} = $config;
 
+    $Configuration->configure($config) if $Configuration;
+
     return $self;
 }
 
@@ -143,7 +195,6 @@ sub _config {
 
     return \%config;
 }
-
 
 sub _makesub {
     my ($class, $config) = @_;
@@ -616,3 +667,76 @@ And many other logging modules:
   Log::AndError
 
 =cut
+
+
+package Log::Channel::Config;
+
+use strict;
+
+use Carp;
+use Log::Channel;
+use XML::Simple;
+use Log::Dispatch::Config;
+
+sub new {
+    my $proto = shift;
+    my $class = ref ($proto) || $proto;
+
+    my $config_file = $ENV{LOG_CHANNEL_CONFIG};
+    return if !$config_file;	# this is not an error condition
+
+    my $config = XMLin($config_file);
+
+    if ($config) {
+	# validate configuration
+	my $dispatcher;
+	if ($config->{dispatch_config}) {
+	    Log::Dispatch::Config->configure($config->{dispatch_config});
+	}
+
+	foreach my $channel_config (@{$config->{channel}}) {
+	    $config->{topic}->{$channel_config->{topic}} = $channel_config;
+	}
+    }
+
+    bless $config, $class;
+    return $config;
+}
+
+sub configure {
+    my ($self, $channel_config) = @_;
+
+    my $topic = $channel_config->{topic};
+    while ($topic) {
+	if ($self->{topic}->{$topic}) {
+	    _configure($self->{topic}->{$topic}, $channel_config->{channel});
+	    return;
+	}
+	# climb the hierarchy
+	($topic) = $topic =~ /(.*)::\w+$/;
+    }
+    # if we get here, there's no configuration for this topic, use defaults
+}
+
+sub _configure {
+    my ($config, $channel) = @_;
+
+    if ($config->{suppress}) {
+	disable $channel;
+    } else {
+	# default is enabled
+	enable $channel;
+    }
+
+    decorate $channel ($config->{decoration})
+      if $config->{decoration};
+
+    if ($config->{dispatch} =~ /Log::Dispatch/oi) {
+	dispatch $channel (Log::Dispatch::Config->instance);
+    }
+
+    $channel->set_priority($config->{priority})
+      if $config->{priority};
+}
+
+1;
