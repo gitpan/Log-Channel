@@ -1,9 +1,8 @@
-#!/usr/bin/perl -w -T
+
 
 use strict;
 use Test::Simple tests => 4;
 
-use lib "./blib/lib";
 use Log::Channel;
 
 close STDERR;
@@ -75,9 +74,13 @@ close STDERR;
 open (LINES, "<$stderrfile") or die $!;
 my @lines = <LINES>;
 close LINES;
+print STDERR "x";
 ok ((scalar @lines == 3), 'line count');
 ok ((scalar grep { "waaah!" } @lines == 1), 'p1 complain');
 ok ((scalar grep { "yeeow!" } @lines == 1), 'p1b complain');
+print STDERR "x";
 ok ((scalar grep { "yarg!" } @lines == 1), 'p2 complain');
 
+print STDERR "x";
 unlink $stderrfile;
+print STDERR "x";
