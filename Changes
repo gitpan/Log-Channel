@@ -1,4 +1,8 @@
 Revision history for Perl extension Log::Channel
 
+0.4   28 Jan 2002
+	- added 'commandeer' function
+	- consolidated internal data structures
+
 0.3   22 Jan 2002
 	- created.

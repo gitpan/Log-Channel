@@ -6,14 +6,16 @@ Log::Channel - yet another logging package
 
 =head1 SYNOPSIS
 
-  use Log::Channel qw(msg);
+  use Log::Channel;
   my $log = new Log::Channel("topic");
+  sub mylog { $log->(@_) }
+
   $log->("this is a log message, by default going to stderr");
-  msg "this is the same as the above";
-  msg sprintf ("Hello, %s", $user);
+  mylog "this is the same as the above";
+  mylog sprintf ("Hello, %s", $user);
 
   decorate Log::Channel "topic", "timestamp: (topic) ";
-  msg "this message will be prefixed with 'timestamp: (topic) '";
+  mylog "this message will be prefixed with 'timestamp: (topic) '";
 
   use Log::Dispatch::File;
   Log::Channel::dispatch("topic",
@@ -22,7 +24,7 @@ Log::Channel - yet another logging package
                                                  filename  => 'foo.log',
                                                  mode      => 'append'
                                                 ));
-  msg "now the message, with decorations, will go to the file";
+  mylog "now the message, with decorations, will go to the file";
 
 =head1 DESCRIPTION
 
@@ -39,18 +41,14 @@ the messages.
 =cut
 
 use strict;
-use Carp;
+use vars qw($VERSION);
+$VERSION = '0.4';
+
+#use Carp;
 use Log::Dispatch;
-use base qw(Exporter);
 
-use vars qw(@EXPORT_OK $VERSION);
-our @EXPORT_OK = qw(msg);
-$VERSION = '0.3';
+my %Channel;
 
-my %AllLogs;
-my %Suppressed;
-
-my %Decoration;
 my %VALID_DECORATION = (
 			"topic" => 1,
 			"timestamp" => 1,
@@ -91,31 +89,34 @@ sub new {
     my $class = ref ($proto) || $proto;
 
     my $topic = (caller)[0];
-    $topic = (caller(1))[0] if $topic eq __PACKAGE__; # if called from msg
     if ($_[0]) {
 	$topic .= "::" . shift;
     }
+
     my $config = _config($topic, @_);
 
     my $self = _makesub($class, $config);
-    bless $self, $class;
+    bless $self, __PACKAGE__;
 
-    $AllLogs{$topic} = $self;
+    $Channel{$topic}->{channel} = $self;
+    disable($topic);
 
     return $self;
 }
 
-sub make {
+sub _make {
     my $proto = shift;
     my $class = ref ($proto) || $proto;
 
-    my $topic = shift;
+    my ($topic) = shift;
+
     my $config = _config($topic, @_);
 
     my $self = _makesub($class, $config);
-    bless $self, $class;
+    bless $self, __PACKAGE__;
 
-    $AllLogs{$topic} = $self;
+    $Channel{$topic}->{channel} = $self;
+    disable($topic);
 
     return $self;
 }
@@ -123,9 +124,9 @@ sub make {
 sub _config {
     my ($topic, %config) = @_;
 
-    if (defined $AllLogs{$topic}) {
-        carp "There is already an active channel for '$topic'";
-    }          
+    if ($Channel{$topic}->{channel}) {
+        carp ("There is already an active channel for '$topic'");
+    }
 
     $config{topic} = $topic;
 
@@ -135,13 +136,13 @@ sub _config {
 
 sub _makesub {
     my ($class, $config) = @_;
-    
+
     *sym = "${class}::_transmit";
     my $transmit = *sym{CODE};
-    
+
     return
       sub {
-          return if $Suppressed{$config->{topic}};
+          return if _disabled($config->{topic});
 
 	  my $dispatchers = $routing->{$config->{topic}};
 	  if ($dispatchers) {
@@ -166,17 +167,26 @@ dispatchers configured for the channel will not be closed.
 
 A channel can be disabled before it is created.
 
+When topic is a package name, recursively disables any sub-packages
+of that package.
+
 =cut
 
 sub disable {
     shift if $_[0] eq __PACKAGE__;
     my ($topic) = @_;
 
+    if (! $Channel{$topic}->{channel}) {
+	_make Log::Channel $topic;
+    }
+
 #    if ($topic !~ /::/) {
 #	$topic = (caller)[0] . "::" . $topic;
 #    }
 
-    $Suppressed{$topic}++;
+    $Channel{$topic}->{suppressed} = 1;
+
+    _recurse ($topic, \&disable);
 }
 
 =item B<enable>
@@ -186,39 +196,99 @@ sub disable {
 Restore transmission of log messages for this topic.  Any dispatchers
 configured for the channel will start receiving the new messages.
 
+A channel can be enabled before it is created.
+
+When topic is a package name, recursively enables any sub-packages
+of that package.
+
 =cut
 
 sub enable {
     shift if $_[0] eq __PACKAGE__;
     my ($topic) = @_;
 
+    if (! $Channel{$topic}->{channel}) {
+	_make Log::Channel $topic;
+    }
+
 #    if ($topic !~ /::/) {
 #	$topic = (caller)[0] . "::" . $topic;
 #    }
 
-    delete $Suppressed{$topic};
+    $Channel{$topic}->{suppressed} = 0;
+
+    _recurse ($topic, \&enable);
 }
 
-=item B<msg>
+sub _disabled {
+    my ($topic) = shift;
 
-  use Log::Channel qw(msg);
-  msg "this is my message";
+    return $Channel{$topic}->{suppressed};
+}
 
-Built-in logging directive.  When exported, this sends the
-message to the logging channel that was most recently created in the
-current package.  If no channel is explicitly created, msg will deliver
-to stderr.
+=item B<commandeer>
 
-This is not recommended when your package uses more than one channel.
+  Log::Channel::commandeer ([$package, $package...]);
+
+Take over delivery of 'carp' log messages for specified packages.  If
+no packages are specified, all currently-loaded packages will be
+commandeered.
+
+When a package is taken over in this fashion, messages generated via
+'carp', 'croak' and so on will be delivered according to the active
+dispatch instructions.  Remember, Log::Channel defaults all message
+delivery to OFF.
+
+Note that the Carp verbose setting should still work correctly.
 
 =cut
 
-sub msg {
-    my $package = (caller)[0];
-    my $channel = $AllLogs{$package} || new Log::Channel;
+sub commandeer {
+    shift if $_[0] eq __PACKAGE__;
 
-    $channel->(@_);
+    local $^W = 0;		# hide 'subroutine redefined' messages
+
+    if (!@_) {
+	# commandeer ALL active modules
+	_commandeer_package ("main");
+    } else {
+	foreach my $package (@_) {
+	    _commandeer_package ($package);
+	}
+    }
 }
+
+sub _commandeer_package {
+    my ($package) = shift;
+
+    # this is a strict-compliant way of defining a subroutine
+    # in another package.  Thanks PerlMonks!
+
+    $main::{$package . '::'}{carp} = \&carp;
+    $main::{$package . '::'}{croak} = \&croak;
+
+    _recurse ($package, \&_commandeer_package);
+}
+
+sub carp {
+    my $package = (caller)[0];
+
+    my $channel = $Channel{$package}->{channel};
+    $channel = _make Log::Channel $package unless $channel;
+
+    $channel->(Carp::shortmess @_);
+}
+
+sub croak {
+    my $package = (caller)[0];
+
+    my $channel = $Channel{$package}->{channel};
+    $channel = _make Log::Channel $package unless $channel;
+
+    $channel->(Carp::shortmess @_);
+    die Carp::shortmess @_;
+}
+
 
 =item B<decorate>
 
@@ -248,7 +318,7 @@ sub decorate {
 #	$topic = (caller)[0] . "::" . $topic;
 #    }
 
-    $Decoration{$topic} = $decorator;
+    $Channel{$topic}->{decoration} = $decorator;
 }
 
 
@@ -281,7 +351,7 @@ sub set_context {
 sub _construct {
     my ($config) = shift;
 
-    my $prefix = $Decoration{$config->{topic}} or return join("", @_);
+    my $prefix = $Channel{$config->{topic}}->{decoration} or return join("", @_);
 
     # See performance comment above
 
@@ -384,13 +454,31 @@ sub status {
 }
 
 
+# _recurse
+#
+# Call the specified function on the name of every sub-package
+# in this package.  Used to recursively apply constraints to
+# sub-packages (disable, enable, commandeer).
+#
+sub _recurse {
+    my ($package, $sub) = @_;
+
+    foreach my $symname (eval "sort keys \%${package}::") {
+	if ($symname =~ /::$/) {
+	    if ($package eq "main") {
+		next if $symname eq "main::";
+		next if $symname =~ /^[_<]/;
+	    }
+	    $symname =~ s/::$//;
+	    $sub->("${package}::$symname");
+	}
+    }
+}
+
+
 1;
 
 =back
-
-=head1 TEST SUITE
-
-Sorry, don't have one yet.
 
 =head1 AUTHOR
 

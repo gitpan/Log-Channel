@@ -2,3 +2,5 @@ Makefile.PL
 Changes
 MANIFEST
 Channel.pm
+t/01_dispatch.t
+t/02_carp.t
